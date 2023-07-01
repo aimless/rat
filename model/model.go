@@ -25,3 +25,12 @@ type Comment struct {
 	Text         []string
 	Children     []*Comment
 }
+
+type SubEntry struct {
+	Title string
+	Link  string
+}
+
+type Sub struct {
+	Entries []*SubEntry
+}

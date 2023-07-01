@@ -1,0 +1,17 @@
+<html>
+	<head>
+        <link rel="stylesheet" href="/styling">
+	</head>
+	<body>
+    <div class="container">
+    <h1>hello</h1>
+    <ul>
+    {{with .Entries}}
+        {{range .}}
+            <li><a href={{.Link}}>{{.Title}}</a></li>
+        {{end}}
+    {{end}}
+    </ul>
+    </div>
+	</body>
+</html>

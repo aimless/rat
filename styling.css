@@ -9,6 +9,7 @@ p {
 
 .container {
     width: 85%;
+    margin: auto;
 }
 
 .comment {
@@ -17,9 +18,13 @@ p {
     border-top-color: #dddddd;
 }
 
+.subcomments {
+    padding-left: 10pt;
+}
+
 p.info {
     font-size: smaller;
-  }
+}
 
 span.user {
     font-weight: bolder;
