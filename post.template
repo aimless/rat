@@ -1,0 +1,43 @@
+<html>
+	{{define "header"}}
+		<p class="info"><span class="user">{{.Author}}</span><span class="score">{{.Score}}</span><span class="time">{{.PostDateTime}}</span></p>
+	{{end}}
+	{{define "body"}}
+		{{range .}}
+			<p class="content">{{.}}</p>
+		{{end}}
+	{{end}}
+	{{define "subcomments"}}
+		<div class="subcomments">
+		{{range .}}
+			{{template "comment" .}}
+		{{end}}
+		</div>
+	{{end}}
+	{{define "comment"}}
+		<div class="comment">
+		{{template "header" . }}
+		{{template "body" .Text }}
+		{{template "subcomments" .Children}}
+		</div>
+	{{end}}
+	<head>
+        <link rel="stylesheet" href="/styling">
+	</head>
+	<body>
+    <div class="container">
+        <div class="post">
+        <h1>{{.Title}}</h1>
+        {{template "header" . }}
+        {{template "body" .Text }}
+        </div>
+        <div class="comments">
+        {{with .Comments}}
+            {{range .}}
+                {{ template "comment" . }}
+            {{end}}
+        {{end}}
+        </div>
+    </div>
+	</body>
+</html>

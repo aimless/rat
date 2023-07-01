@@ -1,0 +1,33 @@
+h1 {
+    font-family: sans-serif;
+}
+
+p {
+    font-family: sans-serif;
+    line-height: 1.2;
+}
+
+.container {
+    width: 85%;
+}
+
+.comment {
+    border-top-width: 1px;
+    border-top-style: solid;
+    border-top-color: #dddddd;
+}
+
+p.info {
+    font-size: smaller;
+  }
+
+span.user {
+    font-weight: bolder;
+}
+
+span.score {
+    margin-left: 5pt;
+    margin-right: 5pt;
+    color: gray;
+}
+
