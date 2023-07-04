@@ -5,10 +5,10 @@ import (
 	"net/http"
 	"rat/model"
 	"rat/util"
-	"regexp"
 	"strings"
 	"time"
 
+	"github.com/kr/pretty"
 	"github.com/yhat/scrape"
 	"golang.org/x/net/html"
 )
@@ -42,7 +42,7 @@ func GetComments(link string, method string, visited *map[string]bool) []*model.
 		panic(err)
 	}
 
-	var comms []*model.Comment
+	var r []*model.Comment
 	links := make(map[string]bool)
 	for _, e := range roots {
 		for _, l := range getDeepCommentLinks(e) {
@@ -52,7 +52,7 @@ func GetComments(link string, method string, visited *map[string]bool) []*model.
 		for _, comment := range comments {
 			c, ok := GetCommentFromNode(comment)
 			if ok {
-				comms = append(comms, c)
+				r = append(r, c)
 			}
 		}
 	}
@@ -60,10 +60,10 @@ func GetComments(link string, method string, visited *map[string]bool) []*model.
 		_, present := (*visited)[k]
 		if !present {
 			fmt.Println(k)
-			comms = append(comms, GetComments(k, "POST", &links)...)
+			r = append(r, GetComments(k, "POST", &links)...)
 		}
 	}
-	return comms
+	return r
 }
 
 // GetCommentFromNode Extract comment from a given node
@@ -71,24 +71,6 @@ func GetCommentFromNode(node *html.Node) (*model.Comment, bool) {
 	if node == nil {
 		return nil, false
 	}
-	textNode := func(n *html.Node) bool {
-		return n.Parent.Data == "p"
-	}
-
-	userNameNode := func(n *html.Node) bool {
-		r := regexp.MustCompile(`\/user\/\w+\/`)
-		link := scrape.Attr(n, "href")
-		isLink := n.Data == "a"
-		isUserLink := r.MatchString(link)
-		hasTextChildNode := false
-		if n.FirstChild != nil {
-			child := n.FirstChild
-			hasTextChildNode = child.Type == html.TextNode
-		}
-
-		return isLink && isUserLink && hasTextChildNode
-	}
-
 	score, _ := util.AttrToInt(node, "score")
 	depth, _ := util.AttrToInt(node, "depth")
 	thing := scrape.Attr(node, "thingid")
@@ -96,7 +78,7 @@ func GetCommentFromNode(node *html.Node) (*model.Comment, bool) {
 	parent := scrape.Attr(node, "parentid")
 
 	p, _ := scrape.Find(node, scrape.ById("-post-rtjson-content"))
-	user, userOk := scrape.Find(node, userNameNode)
+	user, userOk := scrape.Find(node, commentUserNameNode)
 	if !userOk || user == nil || user.FirstChild == nil {
 		return nil, false
 	}
@@ -105,7 +87,7 @@ func GetCommentFromNode(node *html.Node) (*model.Comment, bool) {
 	timeStr := scrape.Attr(timeNode, "ts")
 	t, _ := time.Parse("2006-01-02T15:04:05-0700", timeStr)
 	var text []string
-	for _, node := range scrape.FindAll(p, textNode) {
+	for _, node := range scrape.FindAll(p, commentTextNode) {
 		s := scrape.Text(node)
 		text = append(text, s)
 	}
@@ -176,27 +158,17 @@ func GetPost(link string) (*model.Post, bool) {
 }
 
 func GetSubEntriesFromNode(node *html.Node) []*model.SubEntry {
-	postMatcher := func(n *html.Node) bool {
-		return util.HasAttr(n, "data-testid") && scrape.Attr(n, "data-testid") == "post-container"
-	}
-	postNodes := scrape.FindAll(node, postMatcher)
-
-	headline := func(n *html.Node) bool {
-		return n.Data == "h3"
-	}
-
-	link := func(n *html.Node) bool {
-		lre := regexp.MustCompile(`\/r\/\w*\/comments\/\w*\/\w*\/`)
-		return n.Data == "a" && util.HasAttr(n, "href") && lre.MatchString(scrape.Attr(n, "href"))
-	}
+	postNodes := scrape.FindAll(node, subEntryNode)
 
 	var r []*model.SubEntry
 
 	for _, post := range postNodes {
-		h, _ := scrape.Find(post, headline)
-		title := scrape.Text(h)
-		l, _ := scrape.Find(post, link)
-		r = append(r, &model.SubEntry{Title: title, Link: scrape.Attr(l, "href")})
+		h, headerOk := scrape.Find(post, subEntryHeadline)
+		l, linkOk := scrape.Find(post, subEntryLink)
+		if linkOk && headerOk {
+			title := scrape.Text(h)
+			r = append(r, &model.SubEntry{Title: title, Link: scrape.Attr(l, "href")})
+		}
 	}
 	return r
 }
@@ -212,15 +184,14 @@ func GetSubreddit(url string) (*model.Sub, bool) {
 		return nil, false
 	}
 	entries := GetSubEntriesFromNode(root)
-	return &model.Sub{Entries: entries}, true
+	sub := model.Sub{Entries: entries}
+	pretty.Println(sub)
+	return &sub, true
 }
 
 // Extract comment links leading to unloaded comments from nodes
 func getDeepCommentLinks(node *html.Node) []string {
-	m := func(n *html.Node) bool {
-		return util.HasAttr(n, "src") && util.HasAttr(n, "method")
-	}
-	foo := scrape.FindAllNested(node, m)
+	foo := scrape.FindAllNested(node, commentDeepLink)
 	var links []string
 
 	for _, l := range foo {
@@ -231,7 +202,6 @@ func getDeepCommentLinks(node *html.Node) []string {
 }
 
 func sort(comments []*model.Comment) []*model.Comment {
-
 	for _, i := range comments {
 		for _, j := range comments {
 			if i.Score > j.Score {
@@ -258,6 +228,9 @@ func transformCommentList(comments []*model.Comment) []*model.Comment {
 		item := c[k]
 		if item.Depth == 0 {
 			r = append(r, item)
+		}
+		if item.Depth != 0 && item.Parent == "" {
+			pretty.Println(item)
 		}
 	}
 

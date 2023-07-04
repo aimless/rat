@@ -18,16 +18,19 @@ func getRoot(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 func getSubreddit(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
 	sub := ps.ByName("sub")
 	url := "https://www.reddit.com/r/" + sub
-	subredditInstance, _ := reddit.GetSubreddit(url)
-
-	t := template.New("subreddit.template")
-	tem, err := t.ParseFiles("subreddit.template")
-	if err != nil {
-		panic(err)
-	}
-	err = tem.Execute(w, subredditInstance)
-	if err != nil {
-		panic(err)
+	subredditInstance, ok := reddit.GetSubreddit(url)
+	if ok {
+		t := template.New("subreddit.template")
+		tem, err := t.ParseFiles("subreddit.template")
+		if err != nil {
+			panic(err)
+		}
+		err = tem.Execute(w, subredditInstance)
+		if err != nil {
+			panic(err)
+		}
+	} else {
+		io.WriteString(w, "Subreddit not found!\n")
 	}
 }
 
@@ -59,7 +62,9 @@ func main() {
 	router := httprouter.New()
 	router.GET("/", getRoot)
 	router.GET("/styling", getStyling)
+	router.GET("/r/:sub/comments/:post/:title", getPost)
 	router.GET("/r/:sub/comments/:post/:title/", getPost)
 	router.GET("/r/:sub", getSubreddit)
+	router.GET("/r/:sub/", getSubreddit)
 	http.ListenAndServe(":3333", router)
 }
