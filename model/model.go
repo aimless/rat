@@ -3,6 +3,7 @@ package model
 import "time"
 
 type Post struct {
+	Subreddit    string
 	Author       string
 	Score        int
 	PostDateTime time.Time

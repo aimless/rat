@@ -1,7 +1,7 @@
 package reddit
 
 import (
-	"fmt"
+	"log"
 	"net/http"
 	"rat/model"
 	"rat/util"
@@ -16,8 +16,8 @@ import (
 const redditUrl = "https://www.reddit.com"
 const userAgent = "RAT/1.0"
 
-func request(method string, link string) (*http.Response, error) {
-	url := redditUrl + link
+func request(method string, url string) (*http.Response, error) {
+	log.Print(method, " ", url)
 	client := &http.Client{}
 	req, err := http.NewRequest(method, url, nil)
 	req.Header.Set("User-Agent", userAgent)
@@ -32,7 +32,7 @@ func request(method string, link string) (*http.Response, error) {
 }
 
 // GetComments Get comments recursively from a given link with a given method, visited keeps track of previously visited links
-func GetComments(link string, method string, visited *map[string]bool) []*model.Comment {
+func GetComments(link string, method string) []*model.Comment {
 	resp, err := request(method, link)
 	if err != nil {
 		panic(err)
@@ -43,27 +43,34 @@ func GetComments(link string, method string, visited *map[string]bool) []*model.
 	}
 
 	var r []*model.Comment
-	links := make(map[string]bool)
 	for _, e := range roots {
-		for _, l := range getDeepCommentLinks(e) {
-			links[l] = true
-		}
-		comments := scrape.FindAllNested(e, util.ScrapeByTagType("shreddit-comment"))
+		comments := GetCommentsFromNode(e)
+		r = append(r, comments...)
 		for _, comment := range comments {
-			c, ok := GetCommentFromNode(comment)
+			subcomments, ok := GetTreeFromComment(comment)
 			if ok {
-				r = append(r, c)
+				r = append(r, subcomments...)
 			}
 		}
 	}
-	for k := range links {
-		_, present := (*visited)[k]
-		if !present {
-			fmt.Println(k)
-			r = append(r, GetComments(k, "POST", &links)...)
-		}
-	}
 	return r
+}
+
+func GetTreeFromComment(comment *model.Comment) ([]*model.Comment, bool) {
+	postId := comment.Post
+	commentId := comment.Thing
+	url := redditUrl + "/svc/shreddit/comments/" + postId + "/comment/" + commentId + "/"
+	resp, err := request("GET", url)
+	if err != nil {
+		return nil, false
+	}
+	root, err := html.Parse(resp.Body)
+	if err != nil {
+		return nil, false
+	}
+	comments := GetCommentsFromNode(root)
+	return comments, true
+
 }
 
 // GetCommentFromNode Extract comment from a given node
@@ -103,42 +110,20 @@ func GetCommentFromNode(node *html.Node) (*model.Comment, bool) {
 	}, true
 }
 
-// GetPostFromNode Extract post from a given node
-func GetPostFromNode(node *html.Node) model.Post {
-	title := scrape.Attr(node, "post-title")
-	score, _ := util.AttrToInt(node, "score")
-	author := scrape.Attr(node, "author")
-	timeStr := scrape.Attr(node, "created-timestamp")
-	postDateTime, _ := time.Parse("2006-01-02T15:04:05-0700", timeStr)
-	commentCount, _ := util.AttrToInt(node, "comment-count")
-	post := scrape.Attr(node, "id")
-	subredditPrefixed := scrape.Attr(node, "subreddit-prefixed-name")
-	subreddit, _ := strings.CutPrefix(subredditPrefixed, "r/")
-
-	p := scrape.FindAll(node, util.ScrapeByTagTypeHierarchy("p", "div", "div", "shreddit-post"))
-	var text []string
-	for _, e := range p {
-		text = append(text, scrape.Text(e))
+func GetCommentsFromNode(node *html.Node) []*model.Comment {
+	var r []*model.Comment
+	comments := scrape.FindAllNested(node, util.ScrapeByTagType("shreddit-comment"))
+	for _, commentNode := range comments {
+		c, ok := GetCommentFromNode(commentNode)
+		if ok {
+			r = append(r, c)
+		}
 	}
-
-	id, _ := strings.CutPrefix(post, "t3_")
-	url := "/svc/shreddit/comments/" + subreddit + "/" + id
-	comments := transformCommentList(GetComments(url, "GET", new(map[string]bool)))
-
-	return model.Post{
-		Author:       author,
-		Score:        int(score),
-		Title:        title,
-		PostDateTime: postDateTime,
-		CommentCount: int(commentCount),
-		Post:         post,
-		Comments:     comments,
-		Text:         text,
-	}
+	return r
 }
 
 func GetPost(link string) (*model.Post, bool) {
-	resp, err := http.Get(link)
+	resp, err := request("GET", link)
 	if err != nil {
 		return nil, false
 	}
@@ -153,24 +138,41 @@ func GetPost(link string) (*model.Post, bool) {
 	}
 
 	postNode, _ := scrape.Find(root, matcher)
-	post := GetPostFromNode(postNode)
-	return &post, true
-}
+	postFn := func(node *html.Node) model.Post {
+		title := scrape.Attr(node, "post-title")
+		score, _ := util.AttrToInt(node, "score")
+		author := scrape.Attr(node, "author")
+		timeStr := scrape.Attr(node, "created-timestamp")
+		postDateTime, _ := time.Parse("2006-01-02T15:04:05-0700", timeStr)
+		commentCount, _ := util.AttrToInt(node, "comment-count")
+		post := scrape.Attr(node, "id")
+		subredditPrefixed := scrape.Attr(node, "subreddit-prefixed-name")
+		subreddit, _ := strings.CutPrefix(subredditPrefixed, "r/")
 
-func GetSubEntriesFromNode(node *html.Node) []*model.SubEntry {
-	postNodes := scrape.FindAll(node, subEntryNode)
+		p := scrape.FindAll(node, util.ScrapeByTagTypeHierarchy("p", "div", "div", "shreddit-post"))
+		var text []string
+		for _, e := range p {
+			text = append(text, scrape.Text(e))
+		}
 
-	var r []*model.SubEntry
+		id, _ := strings.CutPrefix(post, "t3_")
+		url := redditUrl + "/svc/shreddit/comments/" + subreddit + "/" + id
+		comments := transformCommentList(GetComments(url, "GET"))
 
-	for _, post := range postNodes {
-		h, headerOk := scrape.Find(post, subEntryHeadline)
-		l, linkOk := scrape.Find(post, subEntryLink)
-		if linkOk && headerOk {
-			title := scrape.Text(h)
-			r = append(r, &model.SubEntry{Title: title, Link: scrape.Attr(l, "href")})
+		return model.Post{
+			Subreddit:    subreddit,
+			Author:       author,
+			Score:        int(score),
+			Title:        title,
+			PostDateTime: postDateTime,
+			CommentCount: int(commentCount),
+			Post:         post,
+			Comments:     comments,
+			Text:         text,
 		}
 	}
-	return r
+	post := postFn(postNode)
+	return &post, true
 }
 
 func GetSubreddit(url string) (*model.Sub, bool) {
@@ -178,27 +180,25 @@ func GetSubreddit(url string) (*model.Sub, bool) {
 	if err != nil {
 		return nil, false
 	}
-
 	root, err := html.Parse(resp.Body)
 	if err != nil {
 		return nil, false
 	}
-	entries := GetSubEntriesFromNode(root)
-	sub := model.Sub{Entries: entries}
-	pretty.Println(sub)
-	return &sub, true
-}
-
-// Extract comment links leading to unloaded comments from nodes
-func getDeepCommentLinks(node *html.Node) []string {
-	foo := scrape.FindAllNested(node, commentDeepLink)
-	var links []string
-
-	for _, l := range foo {
-		link := scrape.Attr(l, "src")
-		links = append(links, link)
+	subEntriesFn := func(node *html.Node) []*model.SubEntry {
+		postNodes := scrape.FindAll(node, subEntryNode)
+		var r []*model.SubEntry
+		for _, post := range postNodes {
+			h, headerOk := scrape.Find(post, subEntryHeadline)
+			l, linkOk := scrape.Find(post, subEntryLink)
+			if linkOk && headerOk {
+				title := scrape.Text(h)
+				r = append(r, &model.SubEntry{Title: title, Link: scrape.Attr(l, "href")})
+			}
+		}
+		return r
 	}
-	return links
+	sub := model.Sub{Entries: subEntriesFn(root)}
+	return &sub, true
 }
 
 func sort(comments []*model.Comment) []*model.Comment {
